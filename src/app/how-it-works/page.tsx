@@ -5,92 +5,160 @@ import Link from 'next/link';
 import {
   Shield,
   Search,
-  Cpu,
   FileCheck,
-  CheckCircle2,
-  AlertTriangle,
   ArrowRight,
-  Database,
-  Lock,
-  Layers,
-  Sparkles,
   Globe,
-  Radio,
-  Calculator
+  Layers
 } from 'lucide-react';
 
-export default function HowItWorksPage() {
-  const [activeFlags, setActiveFlags] = useState<Record<string, boolean>>({
-    fee_deposit: true,
-    personal_email: true
-  });
+type Category = 'payment' | 'credentials' | 'impersonation' | 'mismatch' | 'claims' | 'urgency';
 
-  const scoringRules = [
+// Mirrors the real deterministic engine in src/lib/rules.ts:
+// per-category points, per-category caps, and risk-level score floors.
+const CATEGORY_CAPS: Record<Category, number> = {
+  impersonation: 30,
+  payment: 25,
+  credentials: 25,
+  mismatch: 15,
+  claims: 10,
+  urgency: 10
+};
+
+const RISK_LEVEL_FLOORS: Record<string, number> = {
+  'Very High Risk': 85,
+  'High Risk': 60,
+  'Caution': 25,
+  'Lower Risk': 0
+};
+
+export default function HowItWorksPage() {
+  const scoringRules: {
+    id: string;
+    name: string;
+    category: Category;
+    points: number;
+    desc: string;
+  }[] = [
     {
-      id: 'fee_deposit',
-      name: 'Fee Demand / Laptop Deposit / Training Charge',
-      category: 'Payment Risk',
-      points: 40,
-      desc: 'Immediate material indicator of employment fraud. Legitimate employers supply workstations free of charge.'
+      id: 'fee',
+      name: 'Upfront Fee / Security Deposit Demand',
+      category: 'payment',
+      points: 25,
+      desc: 'Registration, training, laptop, or "refundable" deposit charges. Genuine employers never charge candidates.'
     },
     {
-      id: 'personal_email',
-      name: 'Free Webmail (@gmail/@yahoo) Impersonating Enterprise',
-      category: 'Recruiter Legitimacy',
-      points: 20,
-      desc: 'Claiming affiliation with recognized tech brands (TCS, Infosys, Wipro, Google) using personal consumer email.'
+      id: 'upi',
+      name: 'Direct UPI / QR / Bank-Transfer Channel',
+      category: 'payment',
+      points: 25,
+      desc: 'A personal UPI ID, QR code, or bank account is pushed as the way to "confirm" a seat.'
+    },
+    {
+      id: 'credentials',
+      name: 'OTP / Aadhaar / PAN / Bank Credential Request',
+      category: 'credentials',
+      points: 25,
+      desc: 'Requests for one-time passwords, identity numbers, or banking logins — classic credential harvesting.'
+    },
+    {
+      id: 'impersonation',
+      name: 'Known Brand via Free Webmail or Lookalike Domain',
+      category: 'impersonation',
+      points: 30,
+      desc: 'A recognized company (TCS, Infosys, Google…) contacted from @gmail/@yahoo or a typo-squatted lookalike domain.'
+    },
+    {
+      id: 'channel',
+      name: 'Hiring Routed via Google Form / Telegram / WhatsApp',
+      category: 'mismatch',
+      points: 15,
+      desc: 'Official recruitment does not run through unverified Google Forms or chat-group "tasks".'
     },
     {
       id: 'no_interview',
-      name: 'Direct Appointment Without Technical Interview',
-      category: 'Internship Process',
-      points: 15,
-      desc: 'Issuing appointment letters without coding assessments, portfolios, or interviews.'
-    },
-    {
-      id: 'young_domain',
-      name: 'Newly-Minted Domain (< 90 Days Old via RDAP)',
-      category: 'Domain Forensics',
-      points: 15,
-      desc: 'Domain registered recently, characteristic of disposable phishing or extortion domains.'
-    },
-    {
-      id: 'telegram_tasks',
-      name: 'Telegram Micro-Tasks & Video Rating Scheme',
-      category: 'Scam Patterns',
-      points: 20,
-      desc: 'Soliciting likes, reviews, or task completions with tiered financial deposits.'
-    },
-    {
-      id: 'missing_official_job',
-      name: 'Requisition Missing from Official Careers Portal',
-      category: 'Company Check',
+      name: 'Guaranteed Selection Without Interview',
+      category: 'claims',
       points: 10,
-      desc: 'Requisition ID fails to resolve on verified corporate careers directories.'
+      desc: 'Appointment or "direct joining" offered with no coding test, portfolio, or interview.'
+    },
+    {
+      id: 'urgency',
+      name: 'Artificial Urgency / "Pay Within X Hours"',
+      category: 'urgency',
+      points: 10,
+      desc: 'Short deadlines and "only N seats left" pressure designed to make you act before verifying.'
     }
   ];
+
+  const [activeFlags, setActiveFlags] = useState<Record<string, boolean>>({
+    fee: true,
+    credentials: true
+  });
 
   const toggleFlag = (id: string) => {
     setActiveFlags((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
-  const calculatedScore = Math.min(
-    100,
-    scoringRules.reduce((total, r) => (activeFlags[r.id] ? total + r.points : total), 0)
-  );
+  // Accumulate points per category, apply the category cap (same as the engine).
+  const categoryScores: Record<string, number> = {};
+  let anyActive = false;
+  for (const rule of scoringRules) {
+    if (!activeFlags[rule.id]) continue;
+    anyActive = true;
+    const cap = CATEGORY_CAPS[rule.category];
+    categoryScores[rule.category] = Math.min(cap, (categoryScores[rule.category] || 0) + rule.points);
+  }
+
+  let total = Math.min(100, Object.values(categoryScores).reduce((a, b) => a + b, 0));
 
   let riskTier = 'Lower Risk';
+  if (
+    total >= 80 ||
+    (categoryScores.payment || 0) >= 25 ||
+    (categoryScores.credentials || 0) >= 25 ||
+    (categoryScores.impersonation || 0) >= 30
+  ) {
+    riskTier = 'Very High Risk';
+  } else if (total >= 50) {
+    riskTier = 'High Risk';
+  } else if (total >= 20 || anyActive) {
+    riskTier = 'Caution';
+  }
+
+  // Floor the score to the risk level so the number never contradicts the verdict.
+  total = Math.min(100, Math.max(total, RISK_LEVEL_FLOORS[riskTier]));
+
   let tierColor = 'text-emerald-600 bg-emerald-50 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800';
-  if (calculatedScore >= 70) {
-    riskTier = 'Very High Risk (Extortion / Fraud Pattern)';
+  if (riskTier === 'Very High Risk') {
     tierColor = 'text-rose-600 bg-rose-50 border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800';
-  } else if (calculatedScore >= 45) {
-    riskTier = 'High Risk (Material Irregularities)';
+  } else if (riskTier === 'High Risk') {
     tierColor = 'text-red-600 bg-red-50 border-red-200 dark:bg-red-950/40 dark:text-red-300 dark:border-red-800';
-  } else if (calculatedScore >= 20) {
-    riskTier = 'Caution (Unverified Elements)';
+  } else if (riskTier === 'Caution') {
     tierColor = 'text-amber-600 bg-amber-50 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800';
   }
+
+  const pipeline = [
+    {
+      stage: 'Input Extraction & Sanitization',
+      desc: 'Your submission — pasted message text, email headers, a job link, or an offer-letter PDF — is parsed and normalized. Contact details in public-facing data are redacted.',
+      icon: Search
+    },
+    {
+      stage: 'Deterministic Forensic Rules',
+      desc: 'Pattern and keyword rules scan for the signals that actually define internship fraud: upfront fees, direct UPI/QR payment channels, OTP/Aadhaar/PAN requests, free webmail impersonating a known brand, guaranteed selection without interview, and high-pressure urgency. This engine runs on every check and needs no external service.',
+      icon: Shield
+    },
+    {
+      stage: 'Live Domain & Channel Forensics',
+      desc: 'When a link or domain is present, InternShield queries public ICANN RDAP servers for the domain registration age (flagging domains under 90 days old), cross-checks known enterprises against their official careers portals, and inspects links for URL shorteners, unverified Google Forms, Telegram/WhatsApp funnels, and lookalike domains. Pasted email headers are checked for From/Reply-To mismatches and SPF/DKIM/DMARC failures; uploaded offer letters are scanned for fee and deposit clauses.',
+      icon: Globe
+    },
+    {
+      stage: 'Multi-Pillar Scoring & Report',
+      desc: 'Findings are scored across four pillars — Company, Internship, Recruiter, and Payment & Credential risk — into a single 0–100 score whose number is kept consistent with its risk level. The result is a plain-English report with concrete red flags and student-safety recommendations you can print or share.',
+      icon: FileCheck
+    }
+  ];
 
   return (
     <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8 py-12 space-y-12">
@@ -104,45 +172,18 @@ export default function HowItWorksPage() {
           How InternShield Works
         </h1>
         <p className="text-sm text-slate-600 dark:text-slate-400 max-w-2xl leading-relaxed">
-          An engineering breakdown of our hybrid inspection pipeline combining Google Gemini AI, NVIDIA Nemotron, deterministic heuristics, RDAP domain forensics, and verified community scam logs.
+          A breakdown of the inspection pipeline: deterministic forensic rules, live ICANN RDAP domain-age checks, official careers-portal cross-checking, and transparent multi-pillar risk scoring.
         </p>
       </div>
 
-      {/* The 5-Stage Inspection Pipeline */}
+      {/* Pipeline */}
       <div className="space-y-6">
         <h2 className="text-xl font-bold text-slate-900 dark:text-white">
-          The 5-Stage Detection Pipeline
+          The Detection Pipeline
         </h2>
 
         <div className="space-y-4">
-          {[
-            {
-              stage: 'Phase 1: Input Extraction & Sanitization',
-              desc: 'InternShield ingests user submissions (raw message text, email headers, job links, or offer letter PDFs). Sensitive personal identifiers such as phone numbers, bank accounts, and credentials are protected and separated from public storage.',
-              icon: Search
-            },
-            {
-              stage: 'Phase 2: Deterministic Forensic Scam Rules',
-              desc: 'Before calling any AI models, deterministic regex and pattern-matching rules scan for known extortion keywords: registration fees, refundable laptop deposits, direct UPI payment IDs, and personal webmail addresses claiming corporate affiliation.',
-              icon: Shield
-            },
-            {
-              stage: 'Phase 3: Multi-Tier AI Analysis (Gemini + Nemotron Fallback)',
-              desc: 'The submission is parsed by Google Gemini (gemini-2.0-flash) to evaluate linguistic nuance, role plausibility, and contradictory claims. If Gemini quota is exhausted, the system automatically fails over to NVIDIA Nemotron. If both AI providers are offline, the engine smoothly falls back to the deterministic rules engine.',
-              icon: Cpu
-            },
-            {
-              stage: 'Phase 4: Deep Search Forensics Engine',
-              desc: 'When enabled, live RDAP/WHOIS servers are queried to verify domain age (flagging newly-registered domains <90 days old), requisition IDs are cross-referenced against official corporate portals (TCS, Infosys, Wipro, Google, etc.), recruiter credentials are checked, and cybercrime complaint radar is evaluated.',
-              icon: Radio
-            },
-            {
-              stage: 'Phase 5: Multi-Pillar Scoring & Verification Report',
-              desc: 'A weighted risk score from 0 to 100 is computed across 4 pillars: Company Check, Internship Check, Recruiter Check, and Payment Risk. Practical student advice and transparent reasoning are compiled into a printable report.',
-              icon: FileCheck
-            }
-          ].map((phase, idx) => {
-            const Icon = phase.icon;
+          {pipeline.map((phase, idx) => {
             return (
               <div
                 key={idx}
@@ -170,23 +211,23 @@ export default function HowItWorksPage() {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 dark:border-slate-800 pb-4">
           <div className="space-y-1">
             <span className="text-[11px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400">
-              Interactive Mathematical Model
+              Interactive Scoring Model
             </span>
             <h2 className="text-xl sm:text-2xl font-extrabold tracking-tight text-slate-900 dark:text-white">
-              0–100 Weighted Risk Score Simulator
+              0–100 Risk Score Simulator
             </h2>
           </div>
 
           {/* Result Score Pill */}
           <div className={`px-4 py-2 rounded-2xl border ${tierColor} text-right`}>
             <span className="text-[10px] uppercase font-bold block opacity-80">Composite Score</span>
-            <span className="text-2xl font-black">{calculatedScore}/100</span>
+            <span className="text-2xl font-black">{total}/100</span>
             <span className="text-xs font-semibold block">{riskTier}</span>
           </div>
         </div>
 
         <p className="text-xs text-slate-600 dark:text-slate-400">
-          Toggle different detected signals below to see how our deterministic rules and forensic weights accumulate:
+          Toggle the signals below to see how the real engine scores them. Points accumulate per category up to a category cap, and the final score is floored to its risk level — so a critical signal can never hide behind a low number.
         </p>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -225,14 +266,14 @@ export default function HowItWorksPage() {
         </div>
       </div>
 
-      {/* Deep Search Engine Details */}
+      {/* Forensic Data Sources */}
       <div className="p-8 rounded-3xl bg-blue-50/70 border border-blue-200 dark:bg-blue-950/20 dark:border-blue-900/40 space-y-4">
         <div className="flex items-center gap-2 text-blue-700 dark:text-blue-300 font-bold text-sm">
           <Globe className="h-5 w-5" />
-          <span>Real-World Forensic Data Sources</span>
+          <span>Live Forensic Data Sources</span>
         </div>
         <p className="text-xs sm:text-sm text-slate-700 dark:text-slate-300 leading-relaxed font-medium">
-          InternShield does not guess. The Deep Search engine cross-checks official career portals, tests WHOIS creation dates via ICANN RDAP protocols, validates recruiter profiles, and matches extortion patterns against community complaints.
+          InternShield verifies rather than guesses: domain registration dates are read live from public ICANN RDAP servers, and known enterprises are cross-checked against their documented official careers portals. Every other signal comes from deterministic inspection of the exact content you submit.
         </p>
         <div className="pt-2">
           <Link
