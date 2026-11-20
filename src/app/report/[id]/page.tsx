@@ -35,7 +35,7 @@ export default async function ReportPage({ params }: ReportPageProps) {
   const sanitizedCheck = {
     ...check,
     recruiterEmail: maskSensitiveData(check.recruiterEmail),
-    recruiterPhone: maskSensitiveData(check.recruiterName)
+    recruiterName: maskSensitiveData(check.recruiterName)
   };
 
   return (

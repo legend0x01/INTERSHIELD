@@ -13,12 +13,27 @@ export async function GET(
       return NextResponse.json({ error: 'Check report not found' }, { status: 404 });
     }
 
-    // Mask sensitive recruiter contacts for public display
+    // Mask sensitive recruiter contacts everywhere they can appear for public display
+    const maskAssessment = (a: typeof check.assessments.company) => ({
+      ...a,
+      summary: maskSensitiveData(a.summary),
+      details: a.details.map((d) => maskSensitiveData(d))
+    });
+
     const sanitized = {
       ...check,
+      recruiterName: maskSensitiveData(check.recruiterName),
       recruiterEmail: maskSensitiveData(check.recruiterEmail),
       summary: maskSensitiveData(check.summary),
-      explanation: maskSensitiveData(check.explanation)
+      explanation: maskSensitiveData(check.explanation),
+      redFlags: check.redFlags.map((rf) => maskSensitiveData(rf)),
+      recommendations: check.recommendations.map((r) => maskSensitiveData(r)),
+      assessments: {
+        company: maskAssessment(check.assessments.company),
+        internship: maskAssessment(check.assessments.internship),
+        recruiter: maskAssessment(check.assessments.recruiter),
+        payment: maskAssessment(check.assessments.payment)
+      }
     };
 
     return NextResponse.json({ success: true, check: sanitized });
