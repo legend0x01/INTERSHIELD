@@ -13,7 +13,7 @@ export default function Footer() {
             <AlertTriangle className="h-4 w-4" />
           </div>
           <p className="text-xs leading-relaxed text-slate-600 dark:text-slate-300">
-            <strong className="font-semibold text-slate-800 dark:text-slate-200">Legal & Verification Notice:</strong> InternShield provides an AI-assisted risk assessment based on the information submitted and available automated checks. It is not legal advice, official government verification, or a guarantee that an internship is genuine or fraudulent. Always verify opportunities through the organizationï¿½s official website or careers page.
+            <strong className="font-semibold text-slate-800 dark:text-slate-200">Legal & Verification Notice:</strong> InternShield provides an AI-assisted risk assessment based on the information submitted and available automated checks. It is not legal advice, official government verification, or a guarantee that an internship is genuine or fraudulent. Always verify opportunities through the organization’s official website or careers page.
           </p>
         </div>
       </div>
@@ -84,7 +84,7 @@ export default function Footer() {
               </li>
               <li>
                 <Link href="/how-it-works" className="hover:text-blue-600 transition-colors">
-                  How AI Verification Works
+                  How Verification Works
                 </Link>
               </li>
               <li>
@@ -136,7 +136,7 @@ export default function Footer() {
         </div>
 
         <div className="mt-10 border-t border-slate-200/80 pt-6 flex flex-col sm:flex-row items-center justify-between text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400 gap-3">
-          <p>ï¿½ {2026} InternShield. Built to safeguard college students across India.</p>
+          <p>’ {2026} InternShield. Built to safeguard college students across India.</p>
           <div className="flex items-center gap-4">
             <span className="flex items-center gap-1">
               <Lock className="h-3.5 w-3.5 text-slate-400" /> No Passwords or Bank Details Stored

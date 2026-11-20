@@ -231,7 +231,7 @@ export default function HomePage() {
               },
               {
                 step: '02',
-                title: 'AI & Rules Analysis',
+                title: 'Rules & Forensic Analysis',
                 desc: 'InternShield extracts factual signals: fee demands, recruiter domains, and inconsistent claims.'
               },
               {

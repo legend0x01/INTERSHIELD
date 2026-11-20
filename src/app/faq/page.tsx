@@ -62,7 +62,7 @@ export default function FAQPage() {
       id: 'faq-6',
       category: 'Verification',
       q: 'Does a "Lower Apparent Risk" score mean the internship is 100% guaranteed genuine?',
-      a: 'No automated tool can provide an absolute legal guarantee. A "Lower Risk" score signifies that our deterministic scam rules, forensic pattern scanner, and multi-tier AI detected no known fraud flags in the submitted text. You must always confirm the opening through the company\'s official careers portal or by reaching out to verified HR personnel on LinkedIn.'
+      a: 'No automated tool can provide an absolute legal guarantee. A "Lower Risk" score signifies that our deterministic scam rules and forensic pattern checks detected no known fraud flags in the submitted text. You must always confirm the opening through the company\'s official careers portal or by reaching out to verified HR personnel on LinkedIn.'
     },
     {
       id: 'faq-7',

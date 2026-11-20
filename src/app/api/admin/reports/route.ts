@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAllReportsForAdmin } from '@/lib/store';
+import { verifyAdminToken } from '@/lib/adminAuth';
 
 export async function GET(req: NextRequest) {
   try {
-    const authHeader = req.headers.get('authorization');
-    if (!authHeader || !authHeader.includes('internshield_admin_auth_token_verified')) {
+    if (!verifyAdminToken(req.headers.get('authorization'))) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
