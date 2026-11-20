@@ -3,7 +3,7 @@ import { CheckSubmission, CheckResult, RiskLevel, PillarAssessment, LinkAnalysis
 interface RuleMatch {
   signal: string;
   points: number;
-  category: 'impersonation' | 'payment' | 'mismatch' | 'claims' | 'urgency';
+  category: 'impersonation' | 'payment' | 'credentials' | 'mismatch' | 'claims' | 'urgency';
   level: 'caution' | 'danger';
 }
 
@@ -220,7 +220,7 @@ export function runRuleBasedChecks(
     matches.push({
       signal: 'Request for confidential credentials (OTP, Bank login, PIN, Aadhaar/PAN details)',
       points: 25,
-      category: 'payment',
+      category: 'credentials',
       level: 'danger'
     });
     redFlags.push('Mentions sensitive personal credentials such as OTP, banking credentials, or private identity numbers.');
@@ -319,6 +319,7 @@ export function runRuleBasedChecks(
   const categoryScores: Record<string, number> = {
     impersonation: 0,
     payment: 0,
+    credentials: 0,
     mismatch: 0,
     claims: 0,
     urgency: 0
@@ -327,6 +328,7 @@ export function runRuleBasedChecks(
   const categoryCaps: Record<string, number> = {
     impersonation: 30,
     payment: 25,
+    credentials: 25,
     mismatch: 15,
     claims: 10,
     urgency: 10
@@ -349,13 +351,23 @@ export function runRuleBasedChecks(
 
   // Determine Risk Level according to PRD
   let riskLevel: RiskLevel = 'Lower Risk';
-  if (totalScore >= 80 || categoryScores.payment >= 25 || categoryScores.impersonation >= 30) {
+  if (totalScore >= 80 || categoryScores.payment >= 25 || categoryScores.credentials >= 25 || categoryScores.impersonation >= 30) {
     riskLevel = 'Very High Risk';
   } else if (totalScore >= 50) {
     riskLevel = 'High Risk';
   } else if (totalScore >= 20 || matches.length > 0) {
     riskLevel = 'Caution';
   }
+
+  // Keep the numeric score consistent with the critical risk level, so the risk
+  // meter can never contradict its own verdict (e.g. "Very High Risk" at 35/100).
+  const RISK_LEVEL_FLOORS: Record<RiskLevel, number> = {
+    'Very High Risk': 85,
+    'High Risk': 60,
+    'Caution': 25,
+    'Lower Risk': 0
+  };
+  totalScore = Math.min(100, Math.max(totalScore, RISK_LEVEL_FLOORS[riskLevel]));
 
   // Pillar Assessments
   const companyAssessment: PillarAssessment = {
@@ -397,21 +409,22 @@ export function runRuleBasedChecks(
     ]
   };
 
+  const hasPaymentOrCredentialRisk = categoryScores.payment > 0 || categoryScores.credentials > 0;
   const paymentAssessment: PillarAssessment = {
-    status: categoryScores.payment > 0 ? 'danger' : 'safe',
+    status: hasPaymentOrCredentialRisk ? 'danger' : 'safe',
     title: 'Payment & Credential Risk',
-    summary: categoryScores.payment > 0
+    summary: hasPaymentOrCredentialRisk
       ? 'CRITICAL ALERT: Demands fees, deposits, or sensitive identity/banking information.'
       : 'No upfront fee demands or credential harvesting detected in the submission.',
     details: [
-      categoryScores.payment > 0 ? 'Upfront monetary deposit or personal credential risk identified' : 'No explicit payment demand found',
+      hasPaymentOrCredentialRisk ? 'Upfront monetary deposit or personal credential risk identified' : 'No explicit payment demand found',
       'Reminder: Genuine employers never ask candidates to pay for internships'
     ]
   };
 
   // Build Recommendations
   const recommendations: string[] = [];
-  if (categoryScores.payment > 0) {
+  if (categoryScores.payment > 0 || categoryScores.credentials > 0) {
     recommendations.push('DO NOT PAY ANY MONEY: Genuine companies never charge for interviews, training, offer letters, or security deposits.');
     recommendations.push('NEVER share your OTP, bank account details, UPI PIN, or Aadhaar/PAN documents with unverified recruiters.');
   }
