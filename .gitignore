@@ -47,3 +47,6 @@ node_modules/
 
 .vercel
 .env*
+
+# rules-engine test transpile output
+/.tmp-rules-test

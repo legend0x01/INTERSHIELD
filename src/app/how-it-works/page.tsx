@@ -51,7 +51,7 @@ export default function HowItWorksPage() {
       name: 'Direct UPI / QR / Bank-Transfer Channel',
       category: 'payment',
       points: 25,
-      desc: 'A personal UPI ID, QR code, or bank account is pushed as the way to "confirm" a seat.'
+      desc: 'A personal UPI ID, QR code, "payment link", or bank account is pushed as the way to "confirm" a seat.'
     },
     {
       id: 'credentials',
@@ -76,17 +76,24 @@ export default function HowItWorksPage() {
     },
     {
       id: 'no_interview',
-      name: 'Guaranteed Selection Without Interview',
+      name: 'Guaranteed Selection, Placement, or Certificate',
       category: 'claims',
       points: 10,
-      desc: 'Appointment or "direct joining" offered with no coding test, portfolio, or interview.'
+      desc: '"Guaranteed selection", "direct joining", or "Certificate: Guaranteed" offered instead of a real assessment.'
+    },
+    {
+      id: 'unsolicited',
+      name: 'Selection Announced With No Application or Interview',
+      category: 'claims',
+      points: 10,
+      desc: 'You are told you have been "selected" or "shortlisted", but the message never references an application, interview, test, or campus drive you actually took part in.'
     },
     {
       id: 'urgency',
-      name: 'Artificial Urgency / "Pay Within X Hours"',
+      name: 'Artificial Urgency / Pressure Deadlines',
       category: 'urgency',
       points: 10,
-      desc: 'Short deadlines and "only N seats left" pressure designed to make you act before verifying.'
+      desc: '"Limited seats", "reply within 2 hours", "act now" — pressure designed to make you act before you can verify anything.'
     }
   ];
 
@@ -145,7 +152,7 @@ export default function HowItWorksPage() {
     },
     {
       stage: 'Deterministic Forensic Rules',
-      desc: 'Pattern and keyword rules scan for the signals that actually define internship fraud: upfront fees, direct UPI/QR payment channels, OTP/Aadhaar/PAN requests, free webmail impersonating a known brand, guaranteed selection without interview, and high-pressure urgency. This engine runs on every check and needs no external service.',
+      desc: 'Rules scan for the signals that actually define internship fraud: upfront fees, direct UPI/QR/"payment link" channels, OTP/Aadhaar/PAN requests, free webmail impersonating a known brand, guaranteed selection, and high-pressure urgency. Fee detection matches how scammers really write — "a refundable registration and onboarding fee of ₹1,499" is caught, not just the tidy phrase "registration fee" — while sentence-level negation handling keeps honest lines like "there is no fee at any stage" from being scored as a demand. This engine runs on every check and needs no external service.',
       icon: Shield
     },
     {

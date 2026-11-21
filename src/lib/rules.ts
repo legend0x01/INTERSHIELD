@@ -19,6 +19,118 @@ const FREE_EMAIL_DOMAINS = [
   'rediffmail.com', 'proton.me', 'protonmail.com', 'zoho.com', 'yandex.com'
 ];
 
+// Matching a company name with `includes()` is unsafe for short names: 'ey'
+// matches "money"/"survey"/"journey" and 'hcl'/'ibm' hide inside other words.
+// Word-boundary matching keeps the brand check honest.
+const ENTERPRISE_REGEX = new RegExp(
+  `\\b(?:${KNOWN_ENTERPRISES.map(e => e.replace(/\s+/g, '\\s+')).join('|')})\\b`,
+  'i'
+);
+
+// ---------------------------------------------------------------------------
+// Fee / payment demand detection
+//
+// Scam messages almost never use the tidy phrase "registration fee". They say
+// "a refundable registration and onboarding fee of Rs 1,499", "onboarding
+// charges", "security amount". Rigid adjacent-word patterns miss all of these,
+// so we pair a PRETEXT word with a MONEY noun and allow words in between —
+// but never across a sentence boundary, and never when the sentence is
+// reassuring the candidate ("there is no fee at any stage").
+// ---------------------------------------------------------------------------
+
+// Pretexts that essentially never introduce a legitimate candidate-side
+// payment. Generous gap allowed ("registration and onboarding fee").
+const STRONG_FEE_PRETEXTS =
+  'registration|registeration|register|onboarding|on-boarding|training|security|refundable|non-refundable|processing|enrolment|enrollment|admission|seat|slot|laptop|kit|courier|activation|library|hostel';
+
+// Weaker pretexts that also appear in honest sentences, so these require the
+// money noun to sit right next to them ("interview fee", "document charges").
+const WEAK_FEE_PRETEXTS =
+  'interview|placement|certificate|document|documentation|verification|application|joining|confirmation|service|maintenance|form';
+
+// Nouns that name a charge levied ON the candidate. "payment"/"amount"/"cost"
+// are deliberately excluded here: a genuine offer legitimately says "stipend
+// payment of Rs 25,000", and treating that as a demand is a false accusation.
+const CHARGE_NOUNS = 'fee|fees|deposit|charges|charge';
+const CURRENCY = '(?:₹|rs\\.?|inr|\\$)';
+const GAP = '[a-z0-9\\s,&/()-]'; // deliberately excludes '.' so we stay in one sentence
+
+// Verb phrases that put the candidate on the paying side of the transaction.
+const CANDIDATE_PAYS = '(?:(?:must|need\\s*to|needs\\s*to|have\\s*to|has\\s*to|should|required\\s*to|kindly|please|first)\\s*(?:pay|deposit|transfer|remit|submit)|(?:deposit|transfer|remit)|pay\\s*(?:the|a|an|rs|inr|₹|\\$|now|online|immediately))';
+
+const FEE_PATTERNS: RegExp[] = [
+  // "registration and onboarding fee", "security deposit", "onboarding charges"
+  new RegExp(`\\b(?:${STRONG_FEE_PRETEXTS})\\b${GAP}{0,40}?\\b(?:${CHARGE_NOUNS}|amount|payment)\\b`, 'i'),
+  // "interview fee", "document charges" — tight gap, these pretexts are weaker
+  new RegExp(`\\b(?:${WEAK_FEE_PRETEXTS})\\b${GAP}{0,12}?\\b(?:${CHARGE_NOUNS})\\b`, 'i'),
+  // "fee for registration", "charges towards onboarding"
+  new RegExp(`\\b(?:${CHARGE_NOUNS})\\b${GAP}{0,20}?\\b(?:${STRONG_FEE_PRETEXTS})\\b`, 'i'),
+  // "fee of Rs 1,499", "deposit of 2500"
+  new RegExp(`\\b(?:${CHARGE_NOUNS})\\b[a-z\\s,]{0,15}?${CURRENCY}?\\s*[\\d,]{3,}`, 'i'),
+  // "Rs 1,499 registration charges"
+  new RegExp(`${CURRENCY}\\s*[\\d,]{2,}${GAP}{0,20}?\\b(?:${CHARGE_NOUNS})\\b`, 'i'),
+  // "you must pay Rs 1499", "kindly deposit 2500", "transfer INR 500"
+  new RegExp(`${CANDIDATE_PAYS}[a-z\\s,]{0,20}?${CURRENCY}?\\s*[\\d,]{3,}`, 'i'),
+  // "pay to confirm your seat" / "to secure your slot you must pay" (either order)
+  new RegExp(`\\b(?:pay|payment|deposit|transfer)\\b${GAP}{0,60}?\\b(?:confirm|secure|reserve|block|book)\\b${GAP}{0,30}?\\b(?:seat|slot|position|offer|internship|place)\\b`, 'i'),
+  new RegExp(`\\b(?:confirm|secure|reserve|block|book)\\b${GAP}{0,40}?\\b(?:seat|slot|position|offer|internship|place)\\b${GAP}{0,40}?\\b(?:pay|payment|deposit|transfer)\\b`, 'i')
+];
+
+// Phrases that mean the sentence is REASSURING the candidate, not charging them.
+// These are matched against the whole sentence the hit sits in, so one negation
+// correctly covers a list: "we never ask for a security deposit or any training fee".
+// The negation must govern a charging verb or a money noun — that is what keeps
+// "Do not delay, pay the registration fee" (a real demand) out of this net.
+const REASSURANCE_PHRASES: RegExp[] = [
+  // "no fee", "no registration fee", "zero charges", "no hidden cost"
+  /\b(?:no|zero)\b[a-z\s]{0,20}?\b(?:fee|fees|deposit|charge|charges|payment|cost|money)\b/i,
+  // "never ask", "do not charge", "won't collect", "doesn't demand"
+  /\b(?:never|not|cannot|can'?t|won'?t|doesn'?t|don'?t|didn'?t|will\s*not|would\s*not)\s+(?:\w+\s+){0,2}?(?:ask|asks|asked|charge|charges|charged|collect|collects|demand|demands|require|requires|request|requests|take|takes|seek|seeks|levy|levies|solicit)\b/i,
+  // "without any fee", "free of cost", "at no cost"
+  /\bwithout\s+(?:any\s+)?(?:fee|fees|charge|charges|payment|deposit|cost)\b/i,
+  /\bfree\s+of\s+(?:cost|charge|charges)\b/i,
+  // Educational / warning copy ("beware of fees", "report any fee demand")
+  /\b(?:beware|avoid|refuse|report|scam|fraud|fraudulent|phishing)\b[a-z\s]{0,20}?\b(?:fee|fees|deposit|charge|charges|payment)\b/i
+];
+
+/** The sentence surrounding `index`, bounded by . ! ? or a newline. */
+function sentenceAround(text: string, index: number): string {
+  let start = index;
+  while (start > 0 && !'.!?\n'.includes(text[start - 1])) start--;
+  let end = index;
+  while (end < text.length && !'.!?\n'.includes(text[end])) end++;
+  return text.slice(start, end);
+}
+
+// Money talk that belongs in an honest offer. If the only thing near a match is
+// the company's own payment to the intern, it is not a demand.
+const BENIGN_MONEY_CONTEXT = /\b(?:stipend|salary|ctc|compensation|remuneration|reimburse|reimbursement|we\s*(?:will\s*)?pay|paid\s*(?:monthly|internship))\b/i;
+
+function isReassurance(text: string, matchIndex: number, matched: string): boolean {
+  const sentence = sentenceAround(text, matchIndex);
+  if (REASSURANCE_PHRASES.some(p => p.test(sentence))) return true;
+
+  // Only let benign stipend context excuse a match that has no charge noun of
+  // its own — "registration fee" stays a red flag even next to a stipend line.
+  if (new RegExp(`\\b(?:${CHARGE_NOUNS})\\b`, 'i').test(matched)) return false;
+  return BENIGN_MONEY_CONTEXT.test(sentence);
+}
+
+/** Returns the matched demand text, or null if none is present (or all are negated). */
+function findFeeDemand(text: string): string | null {
+  for (const pattern of FEE_PATTERNS) {
+    const re = new RegExp(pattern.source, 'gi');
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text)) !== null) {
+      if (!isReassurance(text, m.index, m[0])) {
+        return m[0].replace(/\s+/g, ' ').trim();
+      }
+      if (m.index === re.lastIndex) re.lastIndex++;
+    }
+  }
+  return null;
+}
+
 export function runRuleBasedChecks(
   submission: CheckSubmission,
   linkAnalysis?: LinkAnalysis,
@@ -184,8 +296,8 @@ export function runRuleBasedChecks(
   }
 
   // 5. Payment / Fee checks (Max 25 pts)
-  const feeRegex = /(registration\s*fee|training\s*fee|security\s*deposit|laptop\s*deposit|processing\s*fee|document\s*fee|interview\s*fee|id\s*card\s*fee|seat\s*booking\s*fee|refundable\s*deposit|pay\s*(rs|inr|₹|\$)\s*\d+)/i;
-  if (feeRegex.test(fullText)) {
+  const feeDemand = findFeeDemand(fullText);
+  if (feeDemand) {
     if (!matches.some(m => m.category === 'payment')) {
       matches.push({
         signal: 'Request for upfront registration, training, or deposit fee',
@@ -195,14 +307,15 @@ export function runRuleBasedChecks(
       });
     }
     if (!redFlags.some(rf => rf.includes('monetary payment'))) {
-      redFlags.push('Demands monetary payment for registration, training, or security deposit. Genuine internships NEVER charge candidates.');
+      redFlags.push(`Demands monetary payment from the candidate (matched: "${feeDemand}"). Genuine internships NEVER charge candidates a registration, training, or security fee.`);
     }
   }
 
   // UPI and direct transfer checks
   const upiRegex = /([\w.\-_]+@(okhdfcbank|okaxis|oksbi|okicici|paytm|ybl|ibl|upi|axl|apl|barodampay|airtel|gpay|payzapp))/i;
-  const payChannelRegex = /(google\s*pay|phonepe|paytm|upi\s*id|qr\s*code|crypto|usdt|bitcoin|bank\s*transfer|send\s*money)/i;
-  if (upiRegex.test(fullText) || payChannelRegex.test(fullText)) {
+  const payChannelRegex = /(google\s*pay|phonepe|paytm|upi\s*id|qr\s*code|scan\s*(the\s*)?qr|crypto|usdt|bitcoin|bank\s*transfer|net\s*banking|send\s*money|payment\s*link|payment\s*(portal|gateway|page)|pay\s*(here|now\s*:)|account\s*(number|no\.?)\s*:)/i;
+  const payChannelHit = upiRegex.test(fullText) || payChannelRegex.test(fullText);
+  if (payChannelHit) {
     if (!matches.some(m => m.category === 'payment')) {
       matches.push({
         signal: 'Payment channel or UPI ID detected in communication',
@@ -211,7 +324,7 @@ export function runRuleBasedChecks(
         level: 'danger'
       });
     }
-    redFlags.push('Direct payment channels (UPI / QR / Bank transfer) detected in communication.');
+    redFlags.push('Direct payment channels (UPI / QR / bank transfer / "payment link") detected in communication. Recruitment never runs through a personal payment channel.');
   }
 
   // 6. Sensitive Credentials Check (Critical - max 25 pts)
@@ -231,7 +344,7 @@ export function runRuleBasedChecks(
   const company = (submission.companyName || '').toLowerCase();
   const domainFromEmail = email.includes('@') ? email.split('@')[1] : '';
 
-  const claimsKnownEnterprise = KNOWN_ENTERPRISES.some(e => company.includes(e) || fullText.includes(e));
+  const claimsKnownEnterprise = ENTERPRISE_REGEX.test(company) || ENTERPRISE_REGEX.test(fullText);
   const usesFreeEmail = FREE_EMAIL_DOMAINS.includes(domainFromEmail) || FREE_EMAIL_DOMAINS.some(d => fullText.includes(`@${d}`));
 
   if (claimsKnownEnterprise && usesFreeEmail) {
@@ -257,21 +370,38 @@ export function runRuleBasedChecks(
   }
 
   // 8. Guaranteed Selection & No Interview Claims (Max 10 pts)
-  const bogusClaimsRegex = /(guaranteed\s*selection|direct\s*selection|no\s*interview|direct\s*joining|immediate\s*joining\s*letter|100%\s*selection|no\s*assessment|selected\s*without\s*interview)/i;
+  const bogusClaimsRegex = /(guaranteed\s*(selection|placement|job|internship|certificate|stipend|offer)|(certificate|placement|selection|job|offer|internship)\s*:?\s*(is\s*)?guaranteed|100\s*%\s*(selection|placement|guarantee|assured)|assured\s*(selection|placement|job|internship)|direct\s*(selection|joining|offer|placement)|no\s*(interview|test|assessment|coding\s*round|technical\s*round|screening)|selected\s*without\s*(any\s*)?(interview|test|assessment)|without\s*any\s*(interview|test|exam|assessment)|immediate\s*joining\s*letter)/i;
   if (bogusClaimsRegex.test(fullText)) {
     matches.push({
-      signal: 'Claims guaranteed selection or joining without an interview or assessment',
+      signal: 'Claims guaranteed selection, placement, or a certificate without an interview or assessment',
       points: 10,
       category: 'claims',
       level: 'danger'
     });
-    redFlags.push('Unrealistic hiring pattern: Claims guaranteed selection or direct joining without legitimate assessment.');
+    redFlags.push('Unrealistic hiring pattern: Guarantees selection, placement, or a certificate rather than describing a real assessment process.');
+  }
+
+  // 8b. "Selected" out of the blue, with no sign of any real hiring process.
+  // A genuine shortlist always references the application, interview, test, or
+  // campus drive it came from.
+  const selectionLanguageRegex = /(congratulations|you\s*(have\s*been|are|'ve\s*been)\s*(selected|shortlisted|chosen)|(profile|resume|cv|candidature)\s*(has\s*been\s*)?(shortlisted|selected|chosen)|selected\s*for\s*(our|the|an|a)\s*(internship|program|training))/i;
+  const realProcessRegex = /(interview|assessment|aptitude|coding\s*(test|round|challenge)|technical\s*round|hackerrank|resume\s*(screening|review)|you\s*applied|your\s*application\s*(dated|on|submitted)|applied\s*(on|through|via)|campus\s*(drive|placement|interview)|referral|screening\s*call)/i;
+  if (selectionLanguageRegex.test(fullText) && !realProcessRegex.test(fullText)) {
+    matches.push({
+      signal: 'Announces selection with no reference to any application, interview, or assessment',
+      points: 10,
+      category: 'claims',
+      level: 'danger'
+    });
+    redFlags.push('Unsolicited selection: You are told you have been selected or shortlisted, but the message never references an application, interview, test, or campus drive. Nobody can select you for a technical role without assessing you.');
   }
 
   // 9. Unrealistic Stipend / Task / Work Claims (Max 10 pts)
-  const unrealisticStipendRegex = /(₹|rs\.?|inr)\s*(4[0-9],000|[5-9][0-9],000|1,[0-9]{2},000)/i;
-  const simpleTasksRegex = /(data\s*entry|copy\s*paste|form\s*filling|sms\s*sending|captcha\s*typing)/i;
-  if (unrealisticStipendRegex.test(fullText) && simpleTasksRegex.test(fullText)) {
+  const unrealisticStipendRegex = /(₹|rs\.?|inr)\s*(4[0-9],?000|[5-9][0-9],?000|1,?[0-9]{2},?000)/i;
+  const simpleTasksRegex = /(data\s*entry|copy\s*paste|form\s*filling|sms\s*sending|captcha\s*typing|typing\s*work|ad\s*posting)/i;
+  const workFromHomeRegex = /(work\s*from\s*home|\bwfh\b|fully\s*remote\s*internship|remote\s*internship)/i;
+  const highStipend = unrealisticStipendRegex.test(fullText);
+  if (highStipend && simpleTasksRegex.test(fullText)) {
     matches.push({
       signal: 'Exorbitant stipend promised for simplistic tasks (e.g. typing, copy-paste)',
       points: 10,
@@ -279,10 +409,18 @@ export function runRuleBasedChecks(
       level: 'danger'
     });
     redFlags.push('Classic employment lure: Suspiciously high stipend offered for unskilled or repetitive tasks.');
+  } else if (highStipend && workFromHomeRegex.test(fullText) && (feeDemand || bogusClaimsRegex.test(fullText))) {
+    matches.push({
+      signal: 'Implausibly high work-from-home stipend paired with a fee demand or a guaranteed-selection claim',
+      points: 10,
+      category: 'claims',
+      level: 'danger'
+    });
+    redFlags.push('Implausible economics: A high work-from-home stipend is promised to an uninterviewed candidate alongside a payment demand or a selection guarantee — the standard bait pattern.');
   }
 
   // 10. Urgency and High-Pressure Tactics (Max 10 pts)
-  const urgencyRegex = /(valid\s*(only\s*)?for\s*(1|2|3|24)\s*hours|only\s*\d+\s*seats?\s*left|hurry\s*up|immediate\s*action\s*required|pay\s*within|offer\s*expires\s*today)/i;
+  const urgencyRegex = /(valid\s*(only\s*)?for\s*\d+\s*(hours?|hrs?|days?)|limited\s*(seats?|slots?|vacancies|time|period|offer)|only\s*\d+\s*(seats?|slots?|vacancies|positions?)|(seats?|slots?)\s*(are\s*)?(filling|almost\s*full|running\s*out)|within\s*\d+\s*(hours?|hrs?|minutes?|mins?)|within\s*(one|two|three|24|48)\s*(hours?|hrs?)|hurry|act\s*now|\basap\b|right\s*away|don'?t\s*(miss|delay)|last\s*chance|(expires?|expiring)\s*(today|tonight|soon|in\s*\d+)|last\s*date\s*(is\s*)?today|immediate\s*action|reply\s*("?yes"?\s*)?immediately|(immediately|urgently)\s*to\s*(secure|confirm|book|reserve)|pay\s*within|offer\s*expires)/i;
   if (urgencyRegex.test(fullText)) {
     matches.push({
       signal: 'Artificial urgency or time-pressure tactics used to force rapid action',
@@ -290,7 +428,7 @@ export function runRuleBasedChecks(
       category: 'urgency',
       level: 'caution'
     });
-    redFlags.push('Artificial urgency: High-pressure deadlines pushing you to respond or pay before verifying.');
+    redFlags.push('Artificial urgency: High-pressure deadlines ("limited seats", short reply windows) pushing you to act or pay before you can verify anything.');
   }
 
   // Positive signals
@@ -300,8 +438,11 @@ export function runRuleBasedChecks(
   if (submission.companyName && submission.companyName.trim().length > 2) {
     positiveSignals.push(`Specified organization identity: ${submission.companyName}`);
   }
-  if (!feeRegex.test(fullText) && !upiRegex.test(fullText)) {
-    positiveSignals.push('No obvious upfront fee or UPI payment demands detected in provided text.');
+  if (!feeDemand && !payChannelHit && !credRegex.test(fullText)) {
+    positiveSignals.push('No upfront fee, payment channel, or credential request was detected in the provided text.');
+  }
+  if (realProcessRegex.test(fullText)) {
+    positiveSignals.push('References a real hiring step (application, interview, assessment, or campus drive) rather than an out-of-the-blue selection.');
   }
 
   // Unknown / Missing information
