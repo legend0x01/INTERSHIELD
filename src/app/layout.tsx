@@ -29,25 +29,26 @@ export default function RootLayout({
     <html
       lang="en"
       suppressHydrationWarning
-      className={`h-full scroll-smooth dark ${inter.variable} ${jetbrainsMono.variable}`}
-      data-theme="friend"
+      className={`h-full scroll-smooth ${inter.variable} ${jetbrainsMono.variable}`}
     >
       <head>
+        {/* Apply the saved light/dark choice before first paint (no flash).
+            Light is the default; dark only when the visitor chose it. */}
         <script
           dangerouslySetInnerHTML={{
             __html: `
               (function() {
                 try {
-                  document.documentElement.classList.add('dark');
-                  var theme = localStorage.getItem('internshield_ui_theme') || 'friend';
-                  document.documentElement.setAttribute('data-theme', theme);
+                  var dark = localStorage.getItem('internshield_theme') === 'dark';
+                  document.documentElement.classList.toggle('dark', dark);
+                  document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
                 } catch(e) {}
               })();
             `
           }}
         />
       </head>
-      <body className={`${inter.className} min-h-full flex flex-col antialiased selection:bg-cyan-500/30 selection:text-slate-100`}>
+      <body className={`${inter.className} min-h-full flex flex-col bg-slate-50/60 text-slate-900 antialiased dark:bg-slate-950 dark:text-slate-100 selection:bg-blue-500 selection:text-white`}>
         <Navbar />
         <main className="flex-1">{children}</main>
         <Footer />

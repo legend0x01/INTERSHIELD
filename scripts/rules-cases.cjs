@@ -159,7 +159,7 @@ cases.push(
   },
   {
     name: 'Legit: routine 48-hour document deadline',
-    kind: 'legit', maxLevel: 'Caution', mustNotFlag: ['fee', 'credentials'],
+    kind: 'legit', maxLevel: 'Lower Risk', mustNotFlag: ['fee', 'credentials', 'urgency'],
     submission: {
       id: 'a4', inputType: 'text', consent: true,
       companyName: 'Siemens', recruiterEmail: 'recruitment@siemens.com',
@@ -197,6 +197,118 @@ cases.push(
     submission: {
       id: 'a8', inputType: 'text', consent: true,
       text: 'Complete registeration by paying the ID card and kit charges of 750 rupees.'
+    }
+  }
+);
+
+// --- The four "quick sample" buttons on the home page, exactly as CheckerForm sends them ---
+// If a demo button gives the wrong verdict, the product looks broken to every visitor.
+cases.push(
+  {
+    name: 'SAMPLE button "Fee Scam" (TCS, gmail, UPI, laptop deposit)',
+    kind: 'scam', expect: 'Very High Risk', mustFlag: ['fee', 'impersonation'],
+    submission: {
+      inputType: 'text', companyName: 'Tata Consultancy Services (Placement HR)', role: 'Remote Data Analyst Intern',
+      recruiterEmail: 'hr.tcs.placement2026@gmail.com', internshipUrl: '', stipendClaimed: '₹45,000 / month',
+      text: 'Congratulations! You have been directly selected for TCS 3-month Remote Data Analytics Internship. Stipend: Rs 45,000/month. No technical interview required. To confirm your joining kit and laptop delivery, deposit a refundable security charge of Rs 1,999 to UPI: tcsrecruitment@okaxis within 2 hours. Send screenshot of payment to complete onboarding.'
+    }
+  },
+  {
+    name: 'SAMPLE button "Link / Form Check" (Wipro Google Form)',
+    kind: 'scam', expect: 'Very High Risk', mustFlag: ['fee'],
+    submission: {
+      inputType: 'url', companyName: 'Wipro Careers (Alleged)', role: 'Web Developer Intern', recruiterEmail: '',
+      internshipUrl: 'https://forms.gle/wipro-hiring-security-deposit-test', stipendClaimed: '₹30,000 / month',
+      text: 'Link application demanding candidate submit Aadhaar photo and ₹1,500 registration charge.'
+    }
+  },
+  {
+    name: 'SAMPLE button "Header Spoof Check" (Infosys From, gmail Reply-To)',
+    kind: 'scam', expect: 'Very High Risk', mustFlag: ['impersonation'],
+    submission: {
+      inputType: 'email', companyName: 'Infosys Technologies', role: 'Cloud Support Intern', recruiterEmail: 'hr@infosys.com',
+      internshipUrl: '', stipendClaimed: '₹35,000 / month',
+      text: 'From: "Infosys Campus Recruitment" <hr@infosys.com>\nReply-To: "HR Fast Payout" <infosys.recruitment.india@gmail.com>\nSubject: Immediate Selection for Cloud Internship\nDate: Sat, 24 Oct 2026 14:00:00 +0530\n\nDear Student,\nYou have been chosen for the Infosys Cloud Support Internship. You will receive ₹35,000/mo. To accept this position, please respond strictly to our coordinator at infosys.recruitment.india@gmail.com with your contact details and bank IFSC.'
+    }
+  },
+  {
+    name: 'SAMPLE button "Legitimate Offer" (Razorpay, "never asks for bank passwords")',
+    kind: 'legit', maxLevel: 'Lower Risk', maxScore: 15, mustNotFlag: ['fee', 'credentials', 'impersonation'],
+    submission: {
+      inputType: 'text', companyName: 'Razorpay Technologies', role: 'Software Engineering Intern',
+      recruiterEmail: 'campus-hiring@razorpay.com', internshipUrl: 'https://razorpay.com/jobs/intern-swe', stipendClaimed: '₹35,000 / month',
+      text: 'We invite students from engineering disciplines to apply for our Summer 2026 Software Engineering Internship. Candidates will undergo an online coding round followed by 2 technical interviews. Stipend: Rs 35,000/month. Razorpay never asks candidates for any fees, security deposits, or bank passwords at any stage of hiring.'
+    }
+  }
+);
+
+// --- Legitimate offers that mention sensitive words honestly ---
+cases.push(
+  {
+    name: 'Legit: portal sends an OTP to verify your email',
+    kind: 'legit', maxLevel: 'Lower Risk', mustNotFlag: ['credentials'],
+    submission: {
+      inputType: 'text', companyName: 'Freshworks', recruiterEmail: 'campus@freshworks.com',
+      text: 'Thank you for clearing the coding round. Log in to our careers portal; you will receive an OTP to verify your email before the interview is scheduled.'
+    }
+  },
+  {
+    name: 'Legit: bring Aadhaar and PAN on joining day',
+    kind: 'legit', maxLevel: 'Lower Risk', mustNotFlag: ['credentials'],
+    submission: {
+      inputType: 'text', companyName: 'Paytm', recruiterEmail: 'hr@paytm.com',
+      text: 'Following your final interview, your internship starts on 5 January. Please bring your Aadhaar card and PAN card on the joining day for payroll setup at our Noida office.'
+    }
+  },
+  {
+    name: 'Legit: "do not share your OTP or bank details with anyone"',
+    kind: 'legit', maxLevel: 'Lower Risk', mustNotFlag: ['credentials', 'fee'],
+    submission: {
+      inputType: 'text', companyName: 'Flipkart', recruiterEmail: 'campushiring@flipkart.com',
+      text: 'Your interview is confirmed for Tuesday. Please note: Flipkart will never ask you to share your OTP, bank details, or any payment. Do not share your OTP with anyone claiming to represent us.'
+    }
+  },
+  {
+    name: 'Legit: big company named, no email or link given',
+    kind: 'legit', maxLevel: 'Caution', maxScore: 25, mustNotFlag: ['impersonation', 'fee'],
+    submission: {
+      inputType: 'text', companyName: 'Microsoft', role: 'Software Engineering Intern',
+      text: 'I cleared the online assessment and two interview rounds for the Microsoft Explore internship and got an offer through my college placement cell.'
+    }
+  },
+  {
+    name: 'Legit: known company, LinkedIn job link + official email',
+    kind: 'legit', maxLevel: 'Lower Risk', mustNotFlag: ['impersonation', 'fee'],
+    submission: {
+      inputType: 'text', companyName: 'Google', role: 'STEP Intern',
+      recruiterEmail: 'university-recruiting@google.com',
+      internshipUrl: 'https://www.linkedin.com/jobs/view/1234567890',
+      text: 'Thanks for applying to the STEP internship. Your technical interviews are scheduled for next week; details are in your candidate portal.'
+    }
+  },
+  // --- Scams that the credential rule must still catch ---
+  {
+    name: 'Scam: send OTP and Aadhaar on WhatsApp',
+    kind: 'scam', expect: 'Very High Risk', mustFlag: ['secret'],
+    submission: {
+      inputType: 'text',
+      text: 'You are selected. To activate your intern ID, send the OTP you just received and your Aadhaar photo to this number on WhatsApp.'
+    }
+  },
+  {
+    name: 'Scam: asks for UPI PIN to "receive stipend"',
+    kind: 'scam', expect: 'Very High Risk', mustFlag: ['secret'],
+    submission: {
+      inputType: 'text',
+      text: 'To receive your first stipend instantly, enter your UPI PIN on the link we sent.'
+    }
+  },
+  {
+    name: 'Suspicious: send bank details before any interview',
+    kind: 'suspicious', expect: 'Caution', mustFlag: ['credentials'],
+    submission: {
+      inputType: 'text',
+      text: 'Congratulations, you are shortlisted. Kindly share your bank account details and PAN card copy so we can process your stipend.'
     }
   }
 );

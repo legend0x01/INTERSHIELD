@@ -84,8 +84,10 @@ const FEE_PATTERNS: RegExp[] = [
 const REASSURANCE_PHRASES: RegExp[] = [
   // "no fee", "no registration fee", "zero charges", "no hidden cost"
   /\b(?:no|zero)\b[a-z\s]{0,20}?\b(?:fee|fees|deposit|charge|charges|payment|cost|money)\b/i,
-  // "never ask", "do not charge", "won't collect", "doesn't demand"
-  /\b(?:never|not|cannot|can'?t|won'?t|doesn'?t|don'?t|didn'?t|will\s*not|would\s*not)\s+(?:\w+\s+){0,2}?(?:ask|asks|asked|charge|charges|charged|collect|collects|demand|demands|require|requires|request|requests|take|takes|seek|seeks|levy|levies|solicit)\b/i,
+  // "never asks candidates for any fees", "do not share your OTP",
+  // "won't collect bank details". The negated verb must govern a money or
+  // credential term, so "Do not delay, pay the fee" is NOT treated as reassurance.
+  /\b(?:never|not|cannot|can'?t|won'?t|doesn'?t|don'?t|didn'?t|will\s*not|would\s*not|should\s*not|must\s*not)\s+(?:\w+\s+){0,2}?(?:ask|asks|asked|charge|charges|charged|collect|collects|demand|demands|require|requires|request|requests|take|takes|seek|seeks|levy|levies|solicit|share|disclose|reveal|give|provide|send)\b[a-z0-9\s,/-]{0,45}?\b(?:fee|fees|deposit|deposits|charge|charges|payment|payments|money|amount|otp|otps|password|passwords|pin|pins|cvv|aadhaar|pan|bank|upi|transfer|credentials|documents)\b/i,
   // "without any fee", "free of cost", "at no cost"
   /\bwithout\s+(?:any\s+)?(?:fee|fees|charge|charges|payment|deposit|cost)\b/i,
   /\bfree\s+of\s+(?:cost|charge|charges)\b/i,
@@ -106,9 +108,10 @@ function sentenceAround(text: string, index: number): string {
 // the company's own payment to the intern, it is not a demand.
 const BENIGN_MONEY_CONTEXT = /\b(?:stipend|salary|ctc|compensation|remuneration|reimburse|reimbursement|we\s*(?:will\s*)?pay|paid\s*(?:monthly|internship))\b/i;
 
-function isReassurance(text: string, matchIndex: number, matched: string): boolean {
+function isReassurance(text: string, matchIndex: number, matched: string, allowBenignMoney: boolean): boolean {
   const sentence = sentenceAround(text, matchIndex);
   if (REASSURANCE_PHRASES.some(p => p.test(sentence))) return true;
+  if (!allowBenignMoney) return false;
 
   // Only let benign stipend context excuse a match that has no charge noun of
   // its own — "registration fee" stays a red flag even next to a stipend line.
@@ -116,13 +119,17 @@ function isReassurance(text: string, matchIndex: number, matched: string): boole
   return BENIGN_MONEY_CONTEXT.test(sentence);
 }
 
-/** Returns the matched demand text, or null if none is present (or all are negated). */
-function findFeeDemand(text: string): string | null {
-  for (const pattern of FEE_PATTERNS) {
+/**
+ * First match of any pattern that sits in a sentence which is actually asking
+ * for something, i.e. not a reassurance ("we never ask for X"). Returns the
+ * matched text, or null.
+ */
+function findUnnegated(text: string, patterns: RegExp[], allowBenignMoney = true): string | null {
+  for (const pattern of patterns) {
     const re = new RegExp(pattern.source, 'gi');
     let m: RegExpExecArray | null;
     while ((m = re.exec(text)) !== null) {
-      if (!isReassurance(text, m.index, m[0])) {
+      if (!isReassurance(text, m.index, m[0], allowBenignMoney)) {
         return m[0].replace(/\s+/g, ' ').trim();
       }
       if (m.index === re.lastIndex) re.lastIndex++;
@@ -130,6 +137,36 @@ function findFeeDemand(text: string): string | null {
   }
   return null;
 }
+
+function findFeeDemand(text: string): string | null {
+  return findUnnegated(text, FEE_PATTERNS);
+}
+
+// ---------------------------------------------------------------------------
+// Credential harvesting
+//
+// Two tiers, because they mean different things:
+//  - Secrets (OTP, passwords, PINs, CVV, net-banking logins) have no place in a
+//    hiring conversation at all. Asking for one is critical.
+//  - Identity documents (Aadhaar, PAN, bank account/IFSC) are collected by real
+//    employers at onboarding for payroll. Being asked to SEND them before any
+//    interview is a warning sign, not proof, so it scores lower.
+// Both are skipped when the sentence is a reassurance ("we never ask for your OTP").
+// ---------------------------------------------------------------------------
+const SEND_VERBS = '(?:share|send|tell|forward|give|provide|disclose|submit|upload|whatsapp|message|reply\\s*with|mail|email)';
+
+const SECRET_PATTERNS: RegExp[] = [
+  // These have no legitimate reason to appear in a recruiting message.
+  /\b(?:cvv|atm\s*pin|upi\s*pin|m-?pin|bank\s*passwords?|net\s*-?banking\s*(?:passwords?|login|credentials|user\s*id)|internet\s*banking\s*(?:passwords?|login|credentials))\b/i,
+  // OTPs: real portals send them to you, so only a request to hand one over counts.
+  new RegExp(`\\b${SEND_VERBS}\\b[a-z\\s,]{0,25}?\\b(?:otp|one\\s*-?\\s*time\\s*password|verification\\s*code)\\b`, 'i'),
+  /\b(?:otp|one\s*-?\s*time\s*password)\b[a-z\s,]{0,30}?\b(?:to\s*(?:us|me|hr|the\s*hr|our\s*team|this\s*number)|with\s*(?:us|me|hr)|on\s*whatsapp|via\s*whatsapp)\b/i
+];
+
+const ID_DOC_PATTERNS: RegExp[] = [
+  new RegExp(`\\b${SEND_VERBS}\\b[a-z\\s,/&]{0,30}?\\b(?:aadhaar|aadhar|pan\\s*card|pan\\s*number|bank\\s*(?:account|details|statement|passbook)|ifsc|cancelled\\s*cheque)\\b`, 'i'),
+  /\b(?:aadhaar|aadhar|pan\s*card|bank\s*(?:account|details)|ifsc)\b[a-z\s,/&]{0,30}?\b(?:on\s*whatsapp|via\s*whatsapp|to\s*(?:us|me|this\s*number)|through\s*(?:the\s*)?(?:google\s*)?form)\b/i
+];
 
 export function runRuleBasedChecks(
   submission: CheckSubmission,
@@ -154,6 +191,19 @@ export function runRuleBasedChecks(
   const positiveSignals: string[] = [];
   const unknownOrUnverified: string[] = [];
 
+  // Computed first: several later checks only make sense when money is really demanded.
+  const feeDemand = findFeeDemand(fullText);
+
+  // A forged or lookalike sender/link means any "official domain" evidence is
+  // the scammer's claim, not a verification. Computed up front so deep search
+  // can never award credit to a spoofed identity.
+  const identitySpoofed = Boolean(
+    emailAnalysis?.hasReplyToMismatch ||
+    emailAnalysis?.isLookalikeDomain ||
+    (emailAnalysis?.authSignals && emailAnalysis.authSignals.length > 0) ||
+    linkAnalysis?.isLookalikeDomain
+  );
+
   // 1. Incorporate Deep Search Intelligence
   if (deepSearch) {
     if (deepSearch.domainAgeResult?.isNewlyRegistered) {
@@ -170,7 +220,11 @@ export function runRuleBasedChecks(
 
     if (deepSearch.careersPortalMatch) {
       if (deepSearch.careersPortalMatch.matchConfidence === 'Confirmed Official') {
-        positiveSignals.push(`Careers Cross-Check: Verified official careers channel (${deepSearch.careersPortalMatch.targetDomain}).`);
+        if (identitySpoofed) {
+          redFlags.push(`Careers Cross-Check: The message CLAIMS to come from ${deepSearch.careersPortalMatch.targetDomain}, but its headers or links are forged, so that claim cannot be trusted.`);
+        } else {
+          positiveSignals.push(`Careers Cross-Check: Contact domain matches the official careers channel (${deepSearch.careersPortalMatch.targetDomain}).`);
+        }
       } else if (deepSearch.careersPortalMatch.matchConfidence === 'Unlisted Requisition') {
         matches.push({
           signal: 'Requisition not verified on official corporate careers portal',
@@ -182,7 +236,9 @@ export function runRuleBasedChecks(
       }
     }
 
-    if (deepSearch.complaintRadar?.scamComplaintsFound) {
+    // The complaint radar is plain keyword co-occurrence with no negation
+    // handling, so it only counts when the text really demands money.
+    if (deepSearch.complaintRadar?.scamComplaintsFound && feeDemand) {
       matches.push({
         signal: 'Matches frequent cybercrime complaint patterns',
         points: 15,
@@ -250,9 +306,17 @@ export function runRuleBasedChecks(
   // 3. Incorporate Email Analysis Signals
   if (emailAnalysis) {
     if (emailAnalysis.hasReplyToMismatch) {
+      // Replies diverted from a corporate sender to free webmail is the
+      // textbook spoof: critical on its own. A different corporate domain
+      // (an ATS like greenhouse.io) is suspicious but less conclusive.
+      const replyDomain = (emailAnalysis.replyToAddress || '').split('@')[1] || '';
+      const fromIsFree = FREE_EMAIL_DOMAINS.includes(emailAnalysis.fromDomain || '');
+      const divertsToWebmail = FREE_EMAIL_DOMAINS.includes(replyDomain) && !fromIsFree;
       matches.push({
-        signal: 'Header Spoofing: Reply-To address redirects away from sender domain',
-        points: 25,
+        signal: divertsToWebmail
+          ? 'Header Spoofing: corporate sender, but replies are diverted to a free webmail inbox'
+          : 'Header Spoofing: Reply-To address redirects away from sender domain',
+        points: divertsToWebmail ? 30 : 25,
         category: 'impersonation',
         level: 'danger'
       });
@@ -296,7 +360,6 @@ export function runRuleBasedChecks(
   }
 
   // 5. Payment / Fee checks (Max 25 pts)
-  const feeDemand = findFeeDemand(fullText);
   if (feeDemand) {
     if (!matches.some(m => m.category === 'payment')) {
       matches.push({
@@ -312,9 +375,24 @@ export function runRuleBasedChecks(
   }
 
   // UPI and direct transfer checks
-  const upiRegex = /([\w.\-_]+@(okhdfcbank|okaxis|oksbi|okicici|paytm|ybl|ibl|upi|axl|apl|barodampay|airtel|gpay|payzapp))/i;
-  const payChannelRegex = /(google\s*pay|phonepe|paytm|upi\s*id|qr\s*code|scan\s*(the\s*)?qr|crypto|usdt|bitcoin|bank\s*transfer|net\s*banking|send\s*money|payment\s*link|payment\s*(portal|gateway|page)|pay\s*(here|now\s*:)|account\s*(number|no\.?)\s*:)/i;
-  const payChannelHit = upiRegex.test(fullText) || payChannelRegex.test(fullText);
+  // `(?!\.[a-z])` keeps the email hr@paytm.com from reading as the UPI handle hr@paytm.
+  const upiRegex = /([\w.\-_]+@(okhdfcbank|okaxis|oksbi|okicici|paytm|ybl|ibl|upi|axl|apl|barodampay|airtel|gpay|payzapp))\b(?!\.[a-z])/i;
+  // Payment apps are also employers (Paytm, PhonePe, Google Pay all hire interns),
+  // so a brand name alone is not a payment channel. It has to be an instruction
+  // to pay through it, a payment handle, or a payment link.
+  const PAY_CHANNEL_PATTERNS: RegExp[] = [
+    /\b(?:pay|paying|send|transfer|deposit|remit)\w*\b[a-z0-9\s,₹/-]{0,40}?\b(?:via|through|on|using|by|in)\s+(?:google\s*pay|gpay|phonepe|paytm|bhim|upi|crypto|usdt|bitcoin|neft|imps|rtgs|bank\s*transfer|net\s*banking)\b/i,
+    /\b(?:google\s*pay|gpay|phonepe|paytm|upi)\s*(?:number|no|id|handle)\b/i,
+    /\bqr\s*code\b[^.\n]{0,50}?\b(?:pay|payment|amount|fee|fees|deposit)\b/i,
+    /\b(?:pay|payment|amount|fee|fees|deposit)\b[^.\n]{0,50}?\bqr\b/i,
+    /\bpayment\s*(?:link|portal|gateway|page)\b/i,
+    /\bpay\s*(?:here|now)\s*:/i,
+    /\bsend\s*money\b/i,
+    /\b(?:account\s*(?:number|no\.?)|a\/c\s*no\.?)\s*:\s*\d/i
+  ];
+  // A literal UPI handle is always a payment destination; channel wording only
+  // counts outside a reassurance sentence ("stipend is paid by bank transfer").
+  const payChannelHit = upiRegex.test(fullText) || findUnnegated(fullText, PAY_CHANNEL_PATTERNS) !== null;
   if (payChannelHit) {
     if (!matches.some(m => m.category === 'payment')) {
       matches.push({
@@ -327,17 +405,30 @@ export function runRuleBasedChecks(
     redFlags.push('Direct payment channels (UPI / QR / bank transfer / "payment link") detected in communication. Recruitment never runs through a personal payment channel.');
   }
 
-  // 6. Sensitive Credentials Check (Critical - max 25 pts)
-  const credRegex = /(otp|one\s*time\s*password|bank\s*password|atm\s*pin|cvv|aadhaar\s*(card|number)?|pan\s*card\s*number|netbanking)/i;
-  if (credRegex.test(fullText)) {
+  // 6. Sensitive Credentials Check (secrets: critical 25 pts; ID documents: 10 pts)
+  // A stipend mention never excuses a credential request: "enter your UPI PIN
+  // to receive your stipend" is the scam, not a reassurance.
+  const secretRequest = findUnnegated(fullText, SECRET_PATTERNS, false);
+  const idDocRequest = findUnnegated(fullText, ID_DOC_PATTERNS, false);
+  if (secretRequest) {
     matches.push({
-      signal: 'Request for confidential credentials (OTP, Bank login, PIN, Aadhaar/PAN details)',
+      signal: 'Request for confidential credentials (OTP, password, PIN, CVV, or net-banking login)',
       points: 25,
       category: 'credentials',
       level: 'danger'
     });
-    redFlags.push('Mentions sensitive personal credentials such as OTP, banking credentials, or private identity numbers.');
+    redFlags.push(`Asks for a secret credential (matched: "${secretRequest}"). No employer ever needs your OTP, PIN, CVV, or banking password. Sharing one hands over your account.`);
   }
+  if (idDocRequest) {
+    matches.push({
+      signal: 'Asks you to send identity or bank documents before any verified hiring step',
+      points: 10,
+      category: 'credentials',
+      level: 'caution'
+    });
+    redFlags.push(`Asks you to send identity or bank documents (matched: "${idDocRequest}"). Real employers collect these through an HR system after you join, not over chat or a form before selection.`);
+  }
+  const credentialRisk = Boolean(secretRequest || idDocRequest);
 
   // 7. Impersonation & Free email for corporate claims (Max 30 pts)
   const email = (submission.recruiterEmail || emailAnalysis?.fromAddress || '').toLowerCase();
@@ -347,25 +438,24 @@ export function runRuleBasedChecks(
   const claimsKnownEnterprise = ENTERPRISE_REGEX.test(company) || ENTERPRISE_REGEX.test(fullText);
   const usesFreeEmail = FREE_EMAIL_DOMAINS.includes(domainFromEmail) || FREE_EMAIL_DOMAINS.some(d => fullText.includes(`@${d}`));
 
+  // Category caps already stop these from double counting, so every
+  // independent signal is recorded. (An earlier "only if no impersonation match
+  // yet" guard kept a spoofed Infosys email at 25 points, below the critical line.)
   if (claimsKnownEnterprise && usesFreeEmail) {
-    if (!matches.some(m => m.category === 'impersonation')) {
-      matches.push({
-        signal: 'Free public email domain used while claiming association with a recognized corporate entity',
-        points: 30,
-        category: 'impersonation',
-        level: 'danger'
-      });
-    }
+    matches.push({
+      signal: 'Free public email domain used while claiming association with a recognized corporate entity',
+      points: 30,
+      category: 'impersonation',
+      level: 'danger'
+    });
     redFlags.push('High-risk domain mismatch: Recruiter uses a free webmail service (Gmail/Yahoo/Outlook) while claiming to represent a major enterprise.');
   } else if (usesFreeEmail && email) {
-    if (!matches.some(m => m.category === 'mismatch')) {
-      matches.push({
-        signal: 'Official business communication sent from a personal free webmail address',
-        points: 15,
-        category: 'mismatch',
-        level: 'caution'
-      });
-    }
+    matches.push({
+      signal: 'Official business communication sent from a personal free webmail address',
+      points: 15,
+      category: 'mismatch',
+      level: 'caution'
+    });
     redFlags.push('Recruiter uses a personal email address rather than an official corporate domain.');
   }
 
@@ -420,7 +510,7 @@ export function runRuleBasedChecks(
   }
 
   // 10. Urgency and High-Pressure Tactics (Max 10 pts)
-  const urgencyRegex = /(valid\s*(only\s*)?for\s*\d+\s*(hours?|hrs?|days?)|limited\s*(seats?|slots?|vacancies|time|period|offer)|only\s*\d+\s*(seats?|slots?|vacancies|positions?)|(seats?|slots?)\s*(are\s*)?(filling|almost\s*full|running\s*out)|within\s*\d+\s*(hours?|hrs?|minutes?|mins?)|within\s*(one|two|three|24|48)\s*(hours?|hrs?)|hurry|act\s*now|\basap\b|right\s*away|don'?t\s*(miss|delay)|last\s*chance|(expires?|expiring)\s*(today|tonight|soon|in\s*\d+)|last\s*date\s*(is\s*)?today|immediate\s*action|reply\s*("?yes"?\s*)?immediately|(immediately|urgently)\s*to\s*(secure|confirm|book|reserve)|pay\s*within|offer\s*expires)/i;
+  const urgencyRegex = /(valid\s*(only\s*)?for\s*\d+\s*(hours?|hrs?|days?)|limited\s*(seats?|slots?|vacancies|time|period|offer)|only\s*\d+\s*(seats?|slots?|vacancies|positions?)|(seats?|slots?)\s*(are\s*)?(filling|almost\s*full|running\s*out)|within\s*(?:[1-9]|1[0-2])\s*(hours?|hrs?)\b|within\s*\d+\s*(minutes?|mins?)|within\s*(one|two|three|a\s*few)\s*(hours?|hrs?)|hurry|act\s*now|\basap\b|right\s*away|don'?t\s*(miss|delay)|last\s*chance|(expires?|expiring)\s*(today|tonight|soon|in\s*\d+)|last\s*date\s*(is\s*)?today|immediate\s*action|reply\s*("?yes"?\s*)?immediately|(immediately|urgently)\s*to\s*(secure|confirm|book|reserve)|pay\s*within|offer\s*expires)/i;
   if (urgencyRegex.test(fullText)) {
     matches.push({
       signal: 'Artificial urgency or time-pressure tactics used to force rapid action',
@@ -438,7 +528,7 @@ export function runRuleBasedChecks(
   if (submission.companyName && submission.companyName.trim().length > 2) {
     positiveSignals.push(`Specified organization identity: ${submission.companyName}`);
   }
-  if (!feeDemand && !payChannelHit && !credRegex.test(fullText)) {
+  if (!feeDemand && !payChannelHit && !credentialRisk) {
     positiveSignals.push('No upfront fee, payment channel, or credential request was detected in the provided text.');
   }
   if (realProcessRegex.test(fullText)) {
@@ -483,8 +573,12 @@ export function runRuleBasedChecks(
 
   let totalScore = Object.values(categoryScores).reduce((acc, pts) => acc + pts, 0);
 
-  // Apply Deep Search modifier if present
-  if (deepSearch && deepSearch.deepRiskModifier) {
+  // Deep search's risky findings (new domain, off-portal requisition, complaint
+  // patterns) are already scored above as capped matches. Adding its positive
+  // modifier again would count them twice and bypass the caps. Only its credit
+  // (contact on the company's official domain) is applied here, and never when
+  // the identity is spoofed: a forged From: header must not lower the score.
+  if (deepSearch && deepSearch.deepRiskModifier < 0 && !identitySpoofed) {
     totalScore += deepSearch.deepRiskModifier;
   }
 
@@ -599,10 +693,13 @@ export function runRuleBasedChecks(
   else if (riskLevel === 'High Risk') verdict = 'HIGH RISK: Suspicious Opportunity with Multiple Warning Signs';
   else if (riskLevel === 'Caution') verdict = 'CAUTION: Unverified Details or Minor Inconsistencies';
 
-  const summary = `${verdict}. Identified for ${submission.companyName || 'unnamed organization'} (${submission.role || 'unspecified role'}). Score: ${totalScore}/100.`;
+  // Extract from the original-case text: fullText is lowercased for matching,
+  // which used to turn "TechNova Global Solutions" into "technova global solutions".
+  const originalText = submission.text || '';
+  const extractedCompanyName = submission.companyName?.trim() || extractCompanyName(originalText) || 'Unnamed Entity';
+  const extractedRole = submission.role?.trim() || extractRole(originalText) || 'Internship Role';
 
-  const extractedCompanyName = submission.companyName || extractCompanyName(fullText) || 'Unnamed Entity';
-  const extractedRole = submission.role || extractRole(fullText) || 'Internship Role';
+  const summary = `${verdict}. Identified for ${extractedCompanyName} (${extractedRole}). Score: ${totalScore}/100.`;
 
   return {
     id: submission.id || `chk_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
@@ -619,7 +716,9 @@ export function runRuleBasedChecks(
     riskLevel,
     verdict,
     summary,
-    redFlags: redFlags.length > 0 ? redFlags : ['No material red flags detected in the analyzed submission.'],
+    // Empty when clean: the report shows its own "no red flags" message, and a
+    // placeholder string here made a clean offer read "Red Flags (1)".
+    redFlags,
     positiveSignals: positiveSignals.length > 0 ? positiveSignals : ['Standard internship advertisement formatting.'],
     unknownOrUnverified: unknownOrUnverified.length > 0 ? unknownOrUnverified : ['Independent online registration records.'],
     recommendations,
@@ -640,19 +739,26 @@ export function runRuleBasedChecks(
   };
 }
 
-function extractCompanyName(text: string): string {
-  for (const enterprise of KNOWN_ENTERPRISES) {
-    if (text.includes(enterprise)) {
-      return enterprise.toUpperCase();
-    }
-  }
-  const match = text.match(/(?:at|company|org|organization|firm|startup)\s*:\s*([A-Za-z0-9\s]{2,25})/i);
-  return match ? match[1].trim() : '';
+/** Text of a "Label: value" line, cleaned. Works on the ORIGINAL-case text. */
+function labelledValue(text: string, labels: string): string {
+  const m = text.match(new RegExp(`\\b(?:${labels})\\s*(?:name)?\\s*:\\s*([^\\n]{2,60})`, 'i'));
+  if (!m) return '';
+  return m[1].replace(/[\s.,;:!-]+$/, '').trim();
 }
 
-function extractRole(text: string): string {
-  const match = text.match(/(?:role|position|profile|title)\s*:\s*([A-Za-z0-9\s]{2,30})/i);
-  if (match) return match[1].trim();
+function extractCompanyName(originalText: string): string {
+  // An explicit "Company: ..." line beats guessing from brand mentions.
+  const labelled = labelledValue(originalText, 'company|organi[sz]ation|employer|firm|startup');
+  if (labelled) return labelled;
+  // Word-boundary match, keeping the casing the sender used ("Infosys", not "INFOSYS").
+  const brand = originalText.match(ENTERPRISE_REGEX);
+  return brand ? brand[0] : '';
+}
+
+function extractRole(originalText: string): string {
+  const labelled = labelledValue(originalText, 'role|position|profile|designation|job\\s*title|title');
+  if (labelled) return labelled;
+  const text = originalText.toLowerCase();
   if (text.includes('web development')) return 'Web Development Intern';
   if (text.includes('software')) return 'Software Engineering Intern';
   if (text.includes('data science') || text.includes('data analyst')) return 'Data Analytics Intern';

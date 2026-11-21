@@ -1,60 +1,49 @@
 ﻿'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Palette } from 'lucide-react';
+import { Moon, Sun } from 'lucide-react';
 
-const THEMES = [
-  { id: 'friend', label: 'FRIEND', color: '#22D3EE' },
-  { id: 'tactical', label: 'TACTICAL', color: '#F59E0B' },
-  { id: 'overdrive', label: 'OVERDRIVE', color: '#F43F5E' }
-] as const;
+// Light/dark switch. The pre-paint script in app/layout.tsx applies the saved
+// choice before React hydrates, so the page never flashes the wrong theme;
+// this component only reads that state and flips it.
+export const THEME_STORAGE_KEY = 'internshield_theme';
 
-type ThemeId = (typeof THEMES)[number]['id'];
+type Theme = 'light' | 'dark';
 
 export default function ThemeToggle() {
-  const [mounted, setMounted] = useState(false);
-  const [theme, setTheme] = useState<ThemeId>('friend');
+  const [theme, setTheme] = useState<Theme | null>(null);
 
   useEffect(() => {
-    setMounted(true);
-    const saved = (localStorage.getItem('internshield_ui_theme') as ThemeId) || 'friend';
-    setTheme(saved);
-    document.documentElement.setAttribute('data-theme', saved);
-    document.documentElement.classList.add('dark');
+    setTheme(document.documentElement.classList.contains('dark') ? 'dark' : 'light');
   }, []);
 
-  const cycle = () => {
-    const idx = THEMES.findIndex((t) => t.id === theme);
-    const next = THEMES[(idx + 1) % THEMES.length];
-    setTheme(next.id);
-    document.documentElement.setAttribute('data-theme', next.id);
-    document.documentElement.classList.add('dark');
-    localStorage.setItem('internshield_ui_theme', next.id);
+  const toggle = () => {
+    const next: Theme = theme === 'dark' ? 'light' : 'dark';
+    document.documentElement.classList.toggle('dark', next === 'dark');
+    document.documentElement.style.colorScheme = next;
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, next);
+    } catch {
+      // Private mode or blocked storage: the toggle still works for this visit.
+    }
+    setTheme(next);
   };
 
-  if (!mounted) {
-    return <div className="h-9 w-24 rounded-xl animate-pulse" style={{ background: 'var(--bg-tile)' }} />;
+  // Same footprint before hydration, so the navbar doesn't shift.
+  if (theme === null) {
+    return <div className="h-9 w-9 rounded-xl bg-slate-100 dark:bg-slate-800" aria-hidden="true" />;
   }
 
-  const active = THEMES.find((t) => t.id === theme)!;
-
+  const isDark = theme === 'dark';
   return (
     <button
-      onClick={cycle}
       type="button"
-      className="relative inline-flex h-9 items-center gap-2 rounded-xl px-3 text-[11px] font-semibold tracking-[0.09em] uppercase"
-      style={{
-        background: 'var(--bg-tile)',
-        color: 'var(--text-secondary)',
-        border: '1px solid var(--border-subtle)',
-        boxShadow: 'inset 0 1px 0 0 rgba(255,255,255,0.04)'
-      }}
-      title="Switch FRIDAY theme core (FRIEND / TACTICAL / OVERDRIVE)"
-      aria-label="Switch visual theme mode"
+      onClick={toggle}
+      className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 shadow-xs transition-colors hover:bg-slate-50 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 dark:hover:text-white"
+      aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+      title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
     >
-      <span className="h-2 w-2 rounded-full" style={{ background: active.color, boxShadow: `0 0 8px ${active.color}` }} />
-      <Palette className="h-3.5 w-3.5" style={{ color: 'var(--accent-primary)' }} />
-      <span style={{ color: 'var(--accent-primary)' }}>{active.label}</span>
+      {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
     </button>
   );
 }

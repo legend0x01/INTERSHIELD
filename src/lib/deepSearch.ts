@@ -43,6 +43,27 @@ const FREE_EMAIL_DOMAINS = [
   'rediffmail.com', 'proton.me', 'protonmail.com', 'zoho.com'
 ];
 
+// Public job boards and campus platforms where genuine postings are made.
+// A link here is neither proof of legitimacy nor evidence of fraud.
+const NEUTRAL_JOB_BOARDS = [
+  'linkedin.com', 'lnkd.in', 'internshala.com', 'naukri.com', 'unstop.com',
+  'indeed.com', 'glassdoor.com', 'wellfound.com', 'foundit.in', 'instahyre.com',
+  'cutshort.io', 'hirist.tech', 'superset.com', 'joinsuperset.com', 'apna.co',
+  'greenhouse.io', 'lever.co', 'myworkdayjobs.com', 'smartrecruiters.com'
+];
+
+/** Lowercased hostname of a URL or the domain of an email address, else ''. */
+function domainOf(value?: string): string {
+  const v = (value || '').trim().toLowerCase();
+  if (!v) return '';
+  if (v.includes('@') && !v.includes('/')) return v.split('@')[1] || '';
+  try {
+    return new URL(/^https?:\/\//.test(v) ? v : `https://${v}`).hostname.replace(/^www\./, '');
+  } catch {
+    return '';
+  }
+}
+
 export async function runDeepSearchInvestigation(submission: CheckSubmission): Promise<DeepSearchReport> {
   let deepRiskModifier = 0;
   const summaryFindings: string[] = [];
@@ -145,9 +166,31 @@ export async function runDeepSearchInvestigation(submission: CheckSubmission): P
   if (matchedEnterprise) {
     const portalInfo = KNOWN_ENTERPRISE_PORTALS[matchedEnterprise];
     const roleSearched = submission.role || 'Unspecified Internship';
-    const isDirectOfficialDomain = targetDomain === portalInfo.officialDomain || targetDomain.endsWith(`.${portalInfo.officialDomain}`);
 
-    if (isDirectOfficialDomain) {
+    // Judge every contact point the student gave us, not just the first one:
+    // a genuine offer often links a LinkedIn post AND comes from @company.com.
+    const contactDomains = [domainOf(submission.internshipUrl), domainOf(submission.recruiterEmail)].filter(Boolean) as string[];
+    const isOfficial = (d: string) => d === portalInfo.officialDomain || d.endsWith(`.${portalInfo.officialDomain}`);
+    const isDirectOfficialDomain = contactDomains.some(isOfficial);
+    // Only a concrete channel that is neither official nor a recognised job board is evidence.
+    // A missing email is missing information, and LinkedIn/Internshala are where real postings live.
+    const offPortalDomain = contactDomains.find(d => !isOfficial(d) && !NEUTRAL_JOB_BOARDS.some(b => d === b || d.endsWith(`.${b}`)));
+
+    if (!isDirectOfficialDomain && !offPortalDomain) {
+      careersPortalMatch = {
+        targetDomain: portalInfo.officialDomain,
+        roleSearched,
+        matchFound: false,
+        matchConfidence: 'Unable to Verify',
+        officialCareersUrl: portalInfo.careersUrl,
+        signals: [
+          contactDomains.length
+            ? `Posted on a public job board. Confirm the same requisition exists on ${portalInfo.careersUrl}.`
+            : `No recruiter email or link was provided, so the channel could not be checked. Confirm the opening on ${portalInfo.careersUrl}.`,
+          portalInfo.notes
+        ]
+      };
+    } else if (isDirectOfficialDomain) {
       deepRiskModifier = Math.max(-20, deepRiskModifier - 15);
       const signal = `Careers Requisition Verified: Target domain matches ${matchedEnterprise.toUpperCase()} official infrastructure (${portalInfo.officialDomain}).`;
       summaryFindings.push(signal);
@@ -162,7 +205,7 @@ export async function runDeepSearchInvestigation(submission: CheckSubmission): P
       };
     } else {
       deepRiskModifier += 20;
-      const signal = `Official Channel Mismatch: ${matchedEnterprise.toUpperCase()} requisitions are processed exclusively via ${portalInfo.officialDomain}. The provided contact/link is not recognized as an official channel.`;
+      const signal = `Official Channel Mismatch: ${matchedEnterprise.toUpperCase()} requisitions are processed exclusively via ${portalInfo.officialDomain}. The provided contact/link (${offPortalDomain}) is not an official channel.`;
       summaryFindings.push(signal);
 
       careersPortalMatch = {
